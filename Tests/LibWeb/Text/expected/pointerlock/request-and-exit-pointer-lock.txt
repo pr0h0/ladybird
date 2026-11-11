@@ -1,0 +1,11 @@
+pointerlockerror
+Without activation: NotAllowedError
+pointerlockerror
+unadjustedMovement: NotSupportedError
+pointerlockchange, pointerLockElement is target: true
+With activation: resolved
+pointerlockchange, pointerLockElement is target: false
+pointerlockchange, pointerLockElement is target: true
+Again without activation, after exitPointerLock(): resolved
+pointerlockchange, pointerLockElement is target: false
+pointerLockElement: null

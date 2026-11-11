@@ -1,0 +1,7 @@
+Harness status: OK
+
+Found 2 tests
+
+2 Pass
+Pass	Default event values for mouse event interface and its pointer lock extensions.
+Pass	Default event values for pointerlockerror using a dictionary

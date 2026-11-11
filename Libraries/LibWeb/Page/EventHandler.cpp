@@ -973,6 +973,21 @@ static Layout::Node* scroll_containing_block_chain_smoothly(HTML::LocalNavigable
     return nullptr;
 }
 
+bool EventHandler::scroll_from_node_by_wheel_delta(DOM::Node& node, CSSPixelPoint delta)
+{
+    auto document = m_navigable->active_document();
+    if (!document || &node.document() != document.ptr())
+        return false;
+    Layout::ForcedReadScope read { *document };
+    document->update_layout(DOM::UpdateLayoutReason::EventHandlerHandleMouseWheel);
+    auto* layout_node = node.layout_node(read);
+    if (!layout_node)
+        return false;
+    // https://drafts.csswg.org/css-overscroll-1/#overscroll-behavior-properties
+    auto const* box_ending_scroll_chain = Painting::box_ending_scroll_chain(*layout_node, delta.x().to_double(), delta.y().to_double());
+    return scroll_containing_block_chain_smoothly(*m_navigable, *layout_node, delta, Painting::ScrollKind::Relative, Compositing::ScrollAnimationKind::Wheel, box_ending_scroll_chain);
+}
+
 static GC::Ptr<HTML::LocalNavigable> local_navigable_with_compositor_context(Page& page, Web::CompositorContextId context_id)
 {
     for (auto& navigable : HTML::all_local_navigables()) {

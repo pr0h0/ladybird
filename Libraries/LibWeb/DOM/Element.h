@@ -929,7 +929,7 @@ public:
         bool unadjusted_movement { false };
     };
 
-    WebIDL::ExceptionOr<void> request_pointer_lock(PointerLockOptions const&);
+    GC::Ref<WebIDL::Promise> request_pointer_lock(PointerLockOptions const&);
 
     GC::Ptr<HTML::CustomElementRegistry> custom_element_registry() const;
     void set_custom_element_registry(GC::Ptr<HTML::CustomElementRegistry>);

@@ -13086,9 +13086,55 @@ void Document::remove_pending_css_import_rule(Badge<CSS::StyleSheetImport>, Nonn
     }
 }
 
+// https://w3c.github.io/pointerlock/#dom-document-exitpointerlock
 void Document::exit_pointer_lock()
 {
-    dbgln("FIXME: exit_pointer_lock()");
+    // 1. If the user agent's pointer-lock target is null, then return.
+    auto target = page().pointer_lock_target();
+    if (!target)
+        return;
+
+    // 2. If pointer-lock target's shadow-including root is not equal to this's node document, return.
+    if (&target->shadow_including_root() != this)
+        return;
+
+    // 3. Exit pointer lock with the user agent's pointer-lock target.
+    m_has_released_pointer_lock_with_exit_pointer_lock = true;
+    page().exit_pointer_lock();
+}
+
+// https://w3c.github.io/pointerlock/#dom-documentorshadowroot-pointerlockelement
+GC::Ptr<Element> Document::pointer_lock_element() const
+{
+    // While the pointer is locked, returns the result of retargeting the element, which is the target for mouse events,
+    // against this element if the result and this element are in the same tree, otherwise returns null.
+    auto target = page().pointer_lock_target();
+    if (!target)
+        return nullptr;
+    auto* candidate = retarget(target.ptr(), const_cast<Document*>(this));
+    if (auto* retargeted_element = as<Element>(candidate); retargeted_element && &retargeted_element->root() == &root())
+        return retargeted_element;
+    return nullptr;
+}
+
+WebIDL::CallbackType* Document::onpointerlockchange()
+{
+    return event_handler_attribute(HTML::EventNames::pointerlockchange);
+}
+
+void Document::set_onpointerlockchange(WebIDL::CallbackType* value)
+{
+    set_event_handler_attribute(HTML::EventNames::pointerlockchange, value);
+}
+
+WebIDL::CallbackType* Document::onpointerlockerror()
+{
+    return event_handler_attribute(HTML::EventNames::pointerlockerror);
+}
+
+void Document::set_onpointerlockerror(WebIDL::CallbackType* value)
+{
+    set_event_handler_attribute(HTML::EventNames::pointerlockerror, value);
 }
 
 static bool contains_named_namespace(CSS::SelectorList const& selectors)

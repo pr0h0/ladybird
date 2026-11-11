@@ -61,6 +61,11 @@ class WEB_API EventHandler {
     friend class AutoScrollHandler;
 
 public:
+    Optional<CSSPixelPoint> last_known_mouse_visual_viewport_position() const { return m_last_known_mouse_visual_viewport_position; }
+    CSSPixelPoint last_known_mouse_screen_position() const { return m_last_known_mouse_screen_position; }
+    // Scrolls the boxes around the node by a wheel event's delta, as the event's default action.
+    bool scroll_from_node_by_wheel_delta(DOM::Node&, CSSPixelPoint delta);
+
     EventHandler(Badge<HTML::LocalNavigable>, HTML::LocalNavigable&);
     ~EventHandler();
 

@@ -1084,6 +1084,13 @@ void ViewImplementation::enqueue_input_event(Web::InputEvent event)
     // A focused navigable another page hosts takes key events directly.
     if (pending.event.has<Web::KeyEvent>())
         pending.endpoint = focused_navigable_host();
+    // https://w3c.github.io/pointerlock/#pointer-lock-state
+    // The pointer-lock target receives all mouse events, so they go to the root of its document, where no hit test
+    // decides where they go.
+    if (pending.event.has<Web::MouseEvent>() && m_pointer_lock_page) {
+        pending.endpoint = *m_pointer_lock_page;
+        pending.pointer_lock_root_id = m_pointer_lock_root_id;
+    }
     send_queued_input_events();
 }
 
@@ -1149,7 +1156,9 @@ void ViewImplementation::send_input_event(size_t index)
         [&](Web::MouseEvent const& event) {
             // The compositor scrolls or drags a scrollbar for the event when it can, then forwards the event to
             // WebContent behind the scroll updates that produced, consumes it, or hands it back for direct dispatch.
-            if (!event.pointer_data.ptr() && pending.endpoint->handle_and_dispatch_mouse_event_in_compositor(event))
+            if (pending.pointer_lock_root_id.has_value())
+                pending.endpoint->async_mouse_event_in_hosted_root(*pending.pointer_lock_root_id, event.clone_without_browser_data());
+            else if (!event.pointer_data.ptr() && pending.endpoint->handle_and_dispatch_mouse_event_in_compositor(event))
                 pending.routed_through_compositor = true;
             else
                 pending.endpoint->async_mouse_event(event.clone_without_browser_data());
@@ -1492,7 +1501,57 @@ void ViewImplementation::did_lose_input_event_endpoint(Badge<WebContentPage>, We
 {
     // Nothing will finish the events the closed page held, and a pending event holds back compositor input.
     m_pending_input_events.remove_all_matching([&](auto const& pending) { return pending.endpoint == page; });
+    if (m_pending_pointer_lock_page == &page)
+        m_pending_pointer_lock_page = nullptr;
+    end_pointer_lock_of(page);
     send_queued_input_events();
+}
+
+void ViewImplementation::request_pointer_lock_for(Badge<WebContentPage>, WebContentPage& page, Web::HTML::CrossProcessId local_root_id)
+{
+    // The view answers one request at a time.
+    if (!on_request_pointer_lock || m_pending_pointer_lock_page) {
+        page.async_respond_to_pointer_lock_request(false);
+        return;
+    }
+    m_pending_pointer_lock_page = page;
+    m_pending_pointer_lock_root_id = local_root_id;
+    on_request_pointer_lock();
+}
+
+void ViewImplementation::respond_to_pointer_lock_request(bool granted)
+{
+    auto page = move(m_pending_pointer_lock_page);
+
+    // The page closed while the view locked the pointer for it, so the view unlocks it again.
+    if (!page) {
+        if (granted && on_exit_pointer_lock)
+            on_exit_pointer_lock();
+        return;
+    }
+
+    if (granted) {
+        // Another page of the tab that held the pointer loses it.
+        if (m_pointer_lock_page && m_pointer_lock_page != page)
+            exchange(m_pointer_lock_page, nullptr)->exit_pointer_lock_from_view();
+        m_pointer_lock_page = page;
+        m_pointer_lock_root_id = m_pending_pointer_lock_root_id;
+    }
+    page->async_respond_to_pointer_lock_request(granted);
+}
+
+void ViewImplementation::did_exit_pointer_lock(Badge<WebContentPage>, WebContentPage& page)
+{
+    end_pointer_lock_of(page);
+}
+
+void ViewImplementation::end_pointer_lock_of(WebContentPage& page)
+{
+    if (m_pointer_lock_page != &page)
+        return;
+    m_pointer_lock_page = nullptr;
+    if (on_exit_pointer_lock)
+        on_exit_pointer_lock();
 }
 
 void ViewImplementation::did_consume_input_event_in_compositor(Badge<WebContentPage>, u64 event_id)
@@ -2784,6 +2843,13 @@ void ViewImplementation::deny_fullscreen_window()
     traversable().for_each_hosting_page([](WebContentPage& page) {
         page.async_deny_fullscreen_window();
     });
+}
+
+// The default unlock gesture, or the view losing focus, exits pointer lock on the view's side; the page is told after.
+void ViewImplementation::exit_pointer_lock()
+{
+    if (auto page = move(m_pointer_lock_page))
+        page->exit_pointer_lock_from_view();
 }
 
 void ViewImplementation::set_is_fullscreen(Web::ViewportIsFullscreen is_fullscreen)

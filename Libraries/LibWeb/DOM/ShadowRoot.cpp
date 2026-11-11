@@ -28,6 +28,7 @@
 #include <LibWeb/HTML/XMLSerializer.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Layout/NodeArena.h>
+#include <LibWeb/Page/Page.h>
 #include <LibWeb/TrustedTypes/RequireTrustedTypesForDirective.h>
 #include <LibWeb/TrustedTypes/TrustedTypePolicy.h>
 
@@ -106,6 +107,20 @@ GC::Ptr<Element> ShadowRoot::retargeted_fullscreen_element() const
         return retargeted_element;
 
     // 4. Return null.
+    return nullptr;
+}
+
+// https://w3c.github.io/pointerlock/#dom-documentorshadowroot-pointerlockelement
+GC::Ptr<Element> ShadowRoot::pointer_lock_element() const
+{
+    // While the pointer is locked, returns the result of retargeting the element, which is the target for mouse events,
+    // against this element if the result and this element are in the same tree, otherwise returns null.
+    auto target = document().page().pointer_lock_target();
+    if (!target)
+        return nullptr;
+    auto* candidate = retarget(target.ptr(), const_cast<ShadowRoot*>(this));
+    if (auto* retargeted_element = as<Element>(candidate); retargeted_element && &retargeted_element->root() == &root())
+        return retargeted_element;
     return nullptr;
 }
 

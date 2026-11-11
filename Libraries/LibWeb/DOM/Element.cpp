@@ -142,6 +142,7 @@
 #include <LibWeb/HTML/ScrollOptions.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HTML/XMLSerializer.h>
+#include <LibWeb/HighResolutionTime/TimeOrigin.h>
 #include <LibWeb/IntersectionObserver/IntersectionObserver.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
@@ -3100,6 +3101,11 @@ void Element::removed_from(IsSubtreeRoot is_subtree_root, Node* old_ancestor, No
         static_cast<ShadowRoot&>(old_root).element_by_id().remove(*m_id, *this);
 
     if (old_root.is_connected()) {
+        // https://w3c.github.io/pointerlock/#requirements
+        // Pointer lock must be exited if the pointer-lock target becomes disconnected.
+        if (document().page().pointer_lock_target().ptr() == this)
+            document().page().exit_pointer_lock();
+
         if (m_id.has_value())
             document().element_with_id_was_removed({}, *this);
         if (m_has_name)
@@ -7215,10 +7221,50 @@ GC::Ref<CSS::StylePropertyMapReadOnly> Element::computed_style_map()
     return *computed_style_map_cache;
 }
 
-WebIDL::ExceptionOr<void> Element::request_pointer_lock(PointerLockOptions const&)
+// https://w3c.github.io/pointerlock/#dom-element-requestpointerlock
+GC::Ref<WebIDL::Promise> Element::request_pointer_lock(PointerLockOptions const& options)
 {
-    dbgln("FIXME: request_pointer_lock()");
-    return WebIDL::NotSupportedError::create("request_pointer_lock() is not implemented"_utf16);
+    // 1. Let promise be a new promise.
+    auto promise = WebIDL::create_promise_for(*this);
+
+    auto fail = [&](GC::Ref<WebIDL::DOMException> exception) {
+        // Queue an element task on the user interaction task source, given this, to perform the following steps:
+        queue_an_element_task(HTML::Task::Source::UserInteraction, GC::create_function(heap(), GC::captures(*this, promise, exception), [](Element& self, GC::Ref<WebIDL::Promise>& promise, GC::Ref<WebIDL::DOMException>& exception) {
+            // Fire an event named pointerlockerror at this's node document.
+            self.document().dispatch_event(Event::create(HTML::EventNames::pointerlockerror, HighResolutionTime::current_high_resolution_time(HTML::relevant_global_object(self))));
+            // Reject promise with the exception.
+            HTML::TemporaryExecutionContext context(self.document().relevant_settings_object());
+            WebIDL::reject_promise(promise, exception);
+        }));
+        return promise;
+    };
+
+    // 2. When a window is in focus, if this's shadow-including root is the active document of a browsing context (or has
+    //    an ancestor browsing context) that is not in focus: reject with a "WrongDocumentError" DOMException.
+    if (is<Document>(shadow_including_root()) && (!document().is_fully_active() || !document().has_focus()))
+        return fail(WebIDL::WrongDocumentError::create("The document is not focused"_utf16));
+
+    // 3. If this's relevant global object does not have transient activation and the Document has not previously
+    //    released a successful pointer lock with exitPointerLock(): reject with a "NotAllowedError" DOMException.
+    if (!HTML::relevant_window(*this).has_transient_activation() && !document().has_released_pointer_lock_with_exit_pointer_lock())
+        return fail(WebIDL::NotAllowedError::create("Requesting pointer lock requires user activation"_utf16));
+
+    // 4. If this's node document's active sandboxing flag set has the sandboxed pointer lock browsing context flag set:
+    //    reject with a "SecurityError" DOMException.
+    if (has_flag(document().active_sandboxing_flag_set(), HTML::SandboxingFlagSet::SandboxedPointerLock))
+        return fail(WebIDL::SecurityError::create("Pointer lock is not allowed in this sandboxed document"_utf16));
+
+    // 5. If options["unadjustedMovement"] is true and the platform does not support unadjustedMovement: reject with a
+    //    "NotSupportedError" DOMException.
+    // FIXME: Ask the platform for raw mouse input.
+    if (options.unadjusted_movement)
+        return fail(WebIDL::NotSupportedError::create("unadjustedMovement is not supported"_utf16));
+
+    // 6. Enqueue the following steps to the lock requests queue:
+    document().page().request_pointer_lock(*this, promise);
+
+    // 7. Return promise.
+    return promise;
 }
 
 // The element to inherit style from.
@@ -7428,13 +7474,7 @@ GC::Ref<WebIDL::Promise> request_pointer_lock(DOM::Element& element, Optional<Po
             .unadjusted_movement = options->unadjusted_movement,
         };
     }
-    auto promise = WebIDL::create_promise_for(element);
-    auto result = element.request_pointer_lock(dom_options);
-    if (result.is_error())
-        WebIDL::reject_promise_with_exception(promise, result.release_error());
-    else
-        WebIDL::resolve_promise(promise);
-    return promise;
+    return element.request_pointer_lock(dom_options);
 }
 
 WebIDL::ExceptionOr<TrustedTypes::TrustedHTMLOrString> inner_html(DOM::Element& element)

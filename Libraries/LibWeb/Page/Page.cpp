@@ -47,6 +47,7 @@
 #include <LibWeb/HTML/TagNames.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HTML/WindowProxy.h>
+#include <LibWeb/HighResolutionTime/TimeOrigin.h>
 #include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Loader/ContentBlocker.h>
 #include <LibWeb/MediaCapture/MediaDevices.h>
@@ -59,6 +60,11 @@
 #include <LibWeb/Platform/EventLoopPlugin.h>
 #include <LibWeb/Selection/Selection.h>
 #include <LibWeb/Translation/DocumentTranslator.h>
+#include <LibWeb/UIEvents/EventNames.h>
+#include <LibWeb/UIEvents/MouseEvent.h>
+#include <LibWeb/UIEvents/PointerEvent.h>
+#include <LibWeb/UIEvents/WheelEvent.h>
+#include <LibWeb/WebIDL/DOMException.h>
 #include <LibWeb/WebIDL/Promise.h>
 #include <LibWebCommon/Clipboard/SystemClipboard.h>
 #include <LibWebCommon/HTML/NavigationPopulationRequest.h>
@@ -154,6 +160,9 @@ void Page::visit_edges(JS::Cell::Visitor& visitor)
     visitor.visit(m_history_executor);
     visitor.visit(m_picture_in_picture_controller);
     visitor.visit(m_client);
+    visitor.visit(m_pointer_lock_target);
+    visitor.visit(m_pending_pointer_lock_element);
+    visitor.visit(m_pending_pointer_lock_promise);
     visitor.visit(m_window_rect_observer);
     visitor.visit(m_on_pending_dialog_closed);
     visitor.visit(m_pending_clipboard_requests);
@@ -513,6 +522,8 @@ ChromeMetrics Page::chrome_metrics() const
 
 EventResult Page::handle_mouseup(HTML::LocalNavigable& root, DevicePixelPoint position, DevicePixelPoint screen_position, unsigned button, unsigned buttons, unsigned modifiers, Optional<RemoteInputEventTarget>* remote_target)
 {
+    if (m_pointer_lock_target)
+        return handle_pointer_locked_mouse_input({ .type = Web::MouseEvent::Type::MouseUp, .screen_position = screen_position, .button = button, .buttons = buttons, .modifiers = modifiers });
     // INTEROP: Releasing outside an iframe still ends selection and drag tracking in the child document where the
     //          interaction began, while the mouseup event itself remains targeted at the document under the pointer.
     ScopeGuard reset_mouse_input_tracking = [&] {
@@ -531,6 +542,8 @@ EventResult Page::handle_mouseup(DevicePixelPoint position, DevicePixelPoint scr
 
 EventResult Page::handle_mousedown(HTML::LocalNavigable& root, DevicePixelPoint position, DevicePixelPoint screen_position, unsigned button, unsigned buttons, unsigned modifiers, int click_count, Optional<Web::ScrollbarDraggedByCompositor> const& scrollbar_dragged_by_compositor, Optional<RemoteInputEventTarget>* remote_target)
 {
+    if (m_pointer_lock_target)
+        return handle_pointer_locked_mouse_input({ .type = Web::MouseEvent::Type::MouseDown, .screen_position = screen_position, .button = button, .buttons = buttons, .modifiers = modifiers, .click_count = click_count });
     if (button == UIEvents::MouseButton::Primary) {
         if (auto navigable = m_mouse_event_tracking_navigable)
             navigable->event_handler().reset_mouse_input_tracking({});
@@ -556,6 +569,8 @@ void Page::set_hover_reporting_navigable(Badge<EventHandler>, GC::Ptr<HTML::Loca
 
 EventResult Page::handle_mousemove(HTML::LocalNavigable& root, DevicePixelPoint position, DevicePixelPoint screen_position, unsigned buttons, unsigned modifiers, Optional<RemoteInputEventTarget>* remote_target)
 {
+    if (m_pointer_lock_target)
+        return handle_pointer_locked_mouse_input({ .type = Web::MouseEvent::Type::MouseMove, .screen_position = screen_position, .buttons = buttons, .modifiers = modifiers });
     return root.event_handler().handle_mousemove(device_to_css_point(position), device_to_css_point(screen_position), buttons, modifiers, remote_target);
 }
 
@@ -566,6 +581,8 @@ EventResult Page::handle_mousemove(DevicePixelPoint position, DevicePixelPoint s
 
 EventResult Page::handle_mouseleave(HTML::LocalNavigable& root)
 {
+    if (m_pointer_lock_target)
+        return handle_pointer_locked_mouse_input({ .type = Web::MouseEvent::Type::MouseLeave });
     return root.event_handler().handle_mouseleave();
 }
 
@@ -576,6 +593,8 @@ EventResult Page::handle_mouseleave()
 
 EventResult Page::handle_mousecancel(HTML::LocalNavigable& root)
 {
+    if (m_pointer_lock_target)
+        return handle_pointer_locked_mouse_input({ .type = Web::MouseEvent::Type::MouseCancel });
     // The press that is cancelled is tracked by the navigable it began in, which may be nested in the root.
     GC::Ptr<HTML::LocalNavigable> navigable = m_mouse_event_tracking_navigable.ptr();
     m_mouse_event_tracking_navigable = nullptr;
@@ -618,6 +637,8 @@ UniqueNodeID Page::node_id_at_position(DevicePixelPoint position)
 
 EventResult Page::handle_mousewheel(HTML::LocalNavigable& root, DevicePixelPoint position, DevicePixelPoint screen_position, unsigned button, unsigned buttons, unsigned modifiers, double wheel_delta_x, double wheel_delta_y, double wheel_tick_120ths_x, double wheel_tick_120ths_y, Web::WheelDeltaPrecision wheel_delta_precision, Web::ScrollGesturePhase scroll_gesture_phase, bool async_scroll_performed_default_action, Optional<AsyncScrollOperation>* async_scroll_operation, Optional<RemoteInputEventTarget>* remote_target, Optional<Web::WheelGestureMark> wheel_gesture_mark)
 {
+    if (m_pointer_lock_target)
+        return handle_pointer_locked_mouse_input({ .type = Web::MouseEvent::Type::MouseWheel, .screen_position = screen_position, .button = button, .buttons = buttons, .modifiers = modifiers, .wheel_delta_x = wheel_delta_x, .wheel_delta_y = wheel_delta_y, .wheel_tick_120ths_x = wheel_tick_120ths_x, .wheel_tick_120ths_y = wheel_tick_120ths_y });
     return root.event_handler().handle_mousewheel(device_to_css_point(position), device_to_css_point(screen_position), button, buttons, modifiers, wheel_delta_x, wheel_delta_y, wheel_tick_120ths_x, wheel_tick_120ths_y, wheel_delta_precision, scroll_gesture_phase, async_scroll_performed_default_action, async_scroll_operation, remote_target, wheel_gesture_mark);
 }
 
@@ -2644,6 +2665,213 @@ void Page::did_deny_fullscreen_window()
     m_fullscreen_ipc_sent_to_ui = false;
     enter->error = DOM::RequestFullscreenError::NoTransientUserActivation;
     process_pending_fullscreen_operations();
+}
+
+static void fire_pointer_lock_event(DOM::Element& element, Utf16FlyString const& name, GC::Ptr<WebIDL::Promise> promise, GC::Ptr<WebIDL::DOMException> exception = {})
+{
+    // Queue an element task on the user interaction task source, given element, to perform the following steps:
+    element.queue_an_element_task(HTML::Task::Source::UserInteraction, GC::create_function(element.heap(), GC::captures(element, name, promise, exception), [](DOM::Element& element, Utf16FlyString& name, GC::Ptr<WebIDL::Promise>& promise, GC::Ptr<WebIDL::DOMException>& exception) {
+        // Fire an event named name at element's node document.
+        element.document().dispatch_event(DOM::Event::create(name, HighResolutionTime::current_high_resolution_time(HTML::relevant_global_object(element))));
+        if (!promise)
+            return;
+        HTML::TemporaryExecutionContext context(element.document().relevant_settings_object());
+        if (exception)
+            WebIDL::reject_promise(*promise, *exception);
+        else
+            WebIDL::resolve_promise(*promise);
+    }));
+}
+
+// https://w3c.github.io/pointerlock/#dom-element-requestpointerlock
+// NB: These are the steps requestPointerLock() enqueues to the lock requests queue.
+void Page::request_pointer_lock(GC::Ref<DOM::Element> element, GC::Ref<WebIDL::Promise> promise)
+{
+    // 1. If the user agent's pointer-lock target is an element whose shadow-including root is not equal to this's
+    //    shadow-including root, then fire pointerlockerror and reject promise with an "InvalidStateError" DOMException.
+    if (m_pointer_lock_target && &m_pointer_lock_target->shadow_including_root() != &element->shadow_including_root()) {
+        fire_pointer_lock_event(element, HTML::EventNames::pointerlockerror, promise, WebIDL::InvalidStateError::create("The pointer is locked by another document"_utf16));
+        return;
+    }
+
+    // 2. If the user agent's pointer-lock target's shadow-including root is equal to this's shadow-including root and
+    //    options are equivalent to the current pointer-lock options, then:
+    // NB: unadjustedMovement is the only option, and a request for it fails before it is enqueued, so options are
+    //     always equivalent.
+    if (m_pointer_lock_target) {
+        // 1. Set pointer-lock target to this.
+        m_pointer_lock_target = element;
+        // 2. Fire pointerlockchange at this's node document and resolve the promise.
+        fire_pointer_lock_event(element, HTML::EventNames::pointerlockchange, promise);
+        return;
+    }
+
+    // 3. If pointer-lock target is null, process the lock request and handle response upon fulfillment.
+    // FIXME: One request is processed at a time; another that arrives meanwhile fails instead of waiting its turn.
+    if (m_pending_pointer_lock_element) {
+        fire_pointer_lock_event(element, HTML::EventNames::pointerlockerror, promise, WebIDL::InvalidStateError::create("A pointer lock request is already pending"_utf16));
+        return;
+    }
+    auto navigable = element->navigable();
+    if (!navigable) {
+        fire_pointer_lock_event(element, HTML::EventNames::pointerlockerror, promise, WebIDL::WrongDocumentError::create("The element is not in a navigable"_utf16));
+        return;
+    }
+    m_pending_pointer_lock_element = element;
+    m_pending_pointer_lock_promise = promise;
+    client().page_did_request_pointer_lock(navigable->local_root()->id());
+}
+
+void Page::did_respond_to_pointer_lock_request(bool granted)
+{
+    auto element = m_pending_pointer_lock_element;
+    auto promise = m_pending_pointer_lock_promise;
+    m_pending_pointer_lock_element = nullptr;
+    m_pending_pointer_lock_promise = nullptr;
+    if (!element) {
+        if (granted && !m_pointer_lock_target)
+            client().page_did_exit_pointer_lock();
+        return;
+    }
+
+    // If the lock request failed: fire pointerlockerror and reject promise with a "NotSupportedError" DOMException.
+    auto navigable = element->navigable();
+    if (!granted || !element->is_connected() || !navigable) {
+        if (granted)
+            client().page_did_exit_pointer_lock();
+        fire_pointer_lock_event(*element, HTML::EventNames::pointerlockerror, promise, WebIDL::NotSupportedError::create("The pointer could not be locked"_utf16));
+        return;
+    }
+
+    // If the lock request succeed: Enter pointer lock state by performing the following:
+    // 1. Set the user agent's pointer-lock target to this.
+    m_pointer_lock_target = element;
+
+    // 2. Set the user agent's cursor position to the current system mouse location.
+    // FIXME: The position is that in the viewport of the local root, also for a target in a nested navigable it hosts.
+    auto& event_handler = navigable->local_root()->event_handler();
+    m_pointer_lock_client_position = event_handler.last_known_mouse_visual_viewport_position().value_or({});
+    m_pointer_lock_screen_position = event_handler.last_known_mouse_screen_position();
+    m_pointer_lock_previous_screen_position = m_pointer_lock_screen_position;
+    m_pointer_lock_pressed_button = {};
+
+    // 3. Set the pointer-lock options to options.
+    // 4. Fire pointerlockchange at this's node document and resolve the promise.
+    fire_pointer_lock_event(*element, HTML::EventNames::pointerlockchange, promise);
+}
+
+// https://w3c.github.io/pointerlock/#dfn-exit-pointer-lock
+void Page::exit_pointer_lock()
+{
+    auto element = m_pointer_lock_target;
+    if (!element)
+        return;
+
+    // 1. The system mouse cursor must be displayed again and positioned at cursor position.
+    client().page_did_exit_pointer_lock();
+
+    // 2. Queue an element task on the user interaction task source to fire an event named pointerlockchange at the
+    //    given element's node document.
+    fire_pointer_lock_event(*element, HTML::EventNames::pointerlockchange, nullptr);
+
+    // 3. Exit the pointer lock state by setting pointer-lock target, pointer-lock options, and cursor position to null.
+    m_pointer_lock_target = nullptr;
+}
+
+// https://w3c.github.io/pointerlock/#pointer-lock-state
+// The pointer-lock target receives all relevant user generated MouseEvent events: namely, all user-generated mousemove,
+// mousedown, mouseup, click, dblclick, auxclick, and wheel. No other elements receive these events while in pointer lock
+// state. There will be no dispatching of events that require the concept of a mouse cursor.
+EventResult Page::handle_pointer_locked_mouse_input(PointerLockedMouseInput const& input)
+{
+    GC::Ref target = *m_pointer_lock_target;
+
+    // NB: Removing the target exits pointer lock. A document that is no longer fully active does not get the input.
+    if (!target->is_connected() || !target->document().is_fully_active()) {
+        exit_pointer_lock();
+        return EventResult::Dropped;
+    }
+
+    auto& document = target->document();
+    auto& global = HTML::relevant_global_object(*target);
+    auto browsing_context = document.browsing_context();
+    GC::Ptr<HTML::WindowProxy> window_proxy = browsing_context ? browsing_context->window_proxy() : nullptr;
+
+    // When pointer lock is enabled clientX, clientY, screenX, and screenY must hold constant values as if the pointer
+    // did not move at all once pointer lock was entered. But movementX and movementY must continue to provide the
+    // change in position of the pointer as when the pointer is unlocked.
+    // NB: The UI accumulates the motion of the hidden cursor into the screen positions it reports while locked.
+    CSSPixelPoint movement;
+    if (input.type == Web::MouseEvent::Type::MouseMove) {
+        auto screen_position = device_to_css_point(input.screen_position);
+        movement = screen_position - m_pointer_lock_previous_screen_position;
+        m_pointer_lock_previous_screen_position = screen_position;
+    }
+
+    auto client = m_pointer_lock_client_position;
+    auto screen = m_pointer_lock_screen_position;
+    CSSPixelPoint page = client;
+    if (auto navigable = document.navigable())
+        page.translate_by(navigable->viewport_scroll_offset());
+    auto offset = client - target->get_bounding_client_rect().location();
+
+    auto button = input.button;
+    auto buttons = input.buttons;
+    auto modifiers = input.modifiers;
+    bool cancelled = false;
+
+    auto dispatch_mouse_event = [&](Utf16FlyString const& name, Optional<CSSPixelPoint> event_movement = {}) {
+        auto event = UIEvents::MouseEvent::create_from_platform_event(global, window_proxy, name, screen, page, client, offset, event_movement, button, buttons, modifiers).release_value_but_fixme_should_propagate_errors();
+        if (!target->dispatch_event(event))
+            cancelled = true;
+    };
+    auto dispatch_pointer_event = [&](Utf16FlyString const& name, Optional<CSSPixelPoint> event_movement = {}) {
+        auto event = UIEvents::PointerEvent::create_from_platform_event(global, window_proxy, name, screen, page, client, offset, event_movement, button, buttons, modifiers).release_value_but_fixme_should_propagate_errors();
+        if (!target->dispatch_event(event))
+            cancelled = true;
+        return !event->cancelled();
+    };
+
+    switch (input.type) {
+    case Web::MouseEvent::Type::MouseMove:
+        if (movement.is_zero())
+            return EventResult::Handled;
+        dispatch_pointer_event(UIEvents::EventNames::pointermove, movement);
+        dispatch_mouse_event(UIEvents::EventNames::mousemove, movement);
+        break;
+    case Web::MouseEvent::Type::MouseDown:
+        m_pointer_lock_pressed_button = button;
+        if (dispatch_pointer_event(UIEvents::EventNames::pointerdown))
+            dispatch_mouse_event(UIEvents::EventNames::mousedown);
+        break;
+    case Web::MouseEvent::Type::MouseUp:
+        dispatch_pointer_event(UIEvents::EventNames::pointerup);
+        dispatch_mouse_event(UIEvents::EventNames::mouseup);
+        if (m_pointer_lock_pressed_button == button) {
+            dispatch_pointer_event(button == UIEvents::MouseButton::Primary ? UIEvents::EventNames::click : UIEvents::EventNames::auxclick);
+            if (button == UIEvents::MouseButton::Primary && input.click_count == 2)
+                dispatch_mouse_event(UIEvents::EventNames::dblclick);
+        }
+        m_pointer_lock_pressed_button = {};
+        break;
+    case Web::MouseEvent::Type::MouseWheel: {
+        auto event = UIEvents::WheelEvent::create_from_platform_event(global, window_proxy, UIEvents::EventNames::wheel, screen, page, client, offset, input.wheel_delta_x, input.wheel_delta_y, input.wheel_tick_120ths_x, input.wheel_tick_120ths_y, button, buttons, modifiers).release_value_but_fixme_should_propagate_errors();
+        if (!target->dispatch_event(event)) {
+            cancelled = true;
+            break;
+        }
+        // The pointer-lock target is the target of all wheel events, so it is also where scrolling chains from.
+        if (auto navigable = target->navigable())
+            navigable->event_handler().scroll_from_node_by_wheel_delta(target, { input.wheel_delta_x, input.wheel_delta_y });
+        break;
+    }
+    case Web::MouseEvent::Type::MouseLeave:
+    case Web::MouseEvent::Type::MouseCancel:
+        m_pointer_lock_pressed_button = {};
+        break;
+    }
+
+    return cancelled ? EventResult::Cancelled : EventResult::Handled;
 }
 
 void Page::container_fullscreen_complete(HTML::CrossProcessId hosted_root_id)

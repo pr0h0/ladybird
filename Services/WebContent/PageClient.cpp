@@ -985,6 +985,16 @@ void PageClient::page_did_request_exit_fullscreen()
     client().async_did_request_exit_fullscreen(m_id);
 }
 
+void PageClient::page_did_request_pointer_lock(Web::HTML::CrossProcessId local_root_id)
+{
+    client().async_did_request_pointer_lock(m_id, local_root_id);
+}
+
+void PageClient::page_did_exit_pointer_lock()
+{
+    client().async_did_exit_pointer_lock(m_id);
+}
+
 void PageClient::page_did_exit_picture_in_picture()
 {
     client().async_did_exit_picture_in_picture(m_id);

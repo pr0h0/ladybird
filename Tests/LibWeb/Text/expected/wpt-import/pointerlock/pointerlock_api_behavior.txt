@@ -1,0 +1,7 @@
+Harness status: OK
+
+Found 2 tests
+
+2 Pass
+Pass	exitPointerLock() is a no-op when pointer is not locked
+Pass	pointerlockchange event does not bubble and is not cancelable

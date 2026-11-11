@@ -133,6 +133,11 @@ HeadlessWebView::HeadlessWebView(Core::AnonymousBuffer theme, Web::DevicePixelSi
         set_is_fullscreen(Web::ViewportIsFullscreen::No);
     };
 
+    // There is no system cursor to hide, so the pointer is locked as soon as the page asks for it.
+    on_request_pointer_lock = [this] {
+        respond_to_pointer_lock_request(true);
+    };
+
     on_request_alert = [this](auto const&) {
         m_pending_dialog = Web::PendingDialog::Alert;
     };

@@ -138,8 +138,8 @@ partial interface Document {
 // https://w3c.github.io/pointerlock/#extensions-to-the-document-interface
 // FIXME: Move this to a proper home when we have a pointerlock spec folder.
 partial interface Document {
-    [FIXME] attribute EventHandler onpointerlockchange;
-    [FIXME] attribute EventHandler onpointerlockerror;
+    attribute EventHandler onpointerlockchange;
+    attribute EventHandler onpointerlockerror;
     undefined exitPointerLock();
 };
 

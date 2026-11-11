@@ -116,6 +116,8 @@ namespace Web::HTML::EventNames {
     __ENUMERATE_HTML_EVENT(pause)                       \
     __ENUMERATE_HTML_EVENT(play)                        \
     __ENUMERATE_HTML_EVENT(playing)                     \
+    __ENUMERATE_HTML_EVENT(pointerlockchange)           \
+    __ENUMERATE_HTML_EVENT(pointerlockerror)            \
     __ENUMERATE_HTML_EVENT(popstate)                    \
     __ENUMERATE_HTML_EVENT(processorerror)              \
     __ENUMERATE_HTML_EVENT(progress)                    \

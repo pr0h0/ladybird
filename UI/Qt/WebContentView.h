@@ -262,6 +262,10 @@ private:
 
     void update_viewport_size();
     void update_cursor(Gfx::Cursor cursor);
+    void apply_web_content_cursor(QCursor const&);
+    bool lock_pointer();
+    void unlock_pointer();
+    void warp_locked_pointer();
     void schedule_repaint();
 #ifdef LADYBIRD_QT_USE_RHI_WIDGET
     void schedule_frame_damage_repaint();
@@ -327,6 +331,13 @@ private:
 #endif
 
     bool m_follows_mouse_while_inactive { false };
+
+    // https://w3c.github.io/pointerlock/#pointer-lock-state
+    bool m_pointer_locked { false };
+    QCursor m_web_content_cursor;
+    QPoint m_pointer_lock_cursor_position;
+    QPoint m_pointer_lock_last_global_position;
+    QPointF m_pointer_lock_screen_position;
 
     Optional<ByteString> m_tooltip_text;
     QTimer m_tooltip_hover_timer;

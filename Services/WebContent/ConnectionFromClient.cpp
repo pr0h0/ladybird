@@ -263,6 +263,18 @@ void ConnectionFromClient::deny_fullscreen_window(Web::PageId page_id)
         page->page().did_deny_fullscreen_window();
 }
 
+void ConnectionFromClient::respond_to_pointer_lock_request(Web::PageId page_id, bool granted)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().did_respond_to_pointer_lock_request(granted);
+}
+
+void ConnectionFromClient::exit_pointer_lock(Web::PageId page_id)
+{
+    if (auto page = this->page(page_id); page.has_value())
+        page->page().exit_pointer_lock();
+}
+
 void ConnectionFromClient::set_ongoing_navigation(Web::PageId page_id, Web::HTML::CrossProcessId navigable_id, Utf16String navigation_id)
 {
     if (auto page = this->page(page_id); page.has_value())

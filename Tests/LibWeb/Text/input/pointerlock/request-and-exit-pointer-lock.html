@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<canvas id="target"></canvas>
+<script src="../include.js"></script>
+<script>
+    promiseTest(async () => {
+        const target = document.getElementById("target");
+        let changed;
+        document.onpointerlockchange = () => {
+            println(`pointerlockchange, pointerLockElement is target: ${document.pointerLockElement === target}`);
+            changed?.();
+        };
+        document.onpointerlockerror = () => println("pointerlockerror");
+
+        async function request(description, options) {
+            try {
+                await target.requestPointerLock(options);
+                println(`${description}: resolved`);
+            } catch (e) {
+                println(`${description}: ${e.name}`);
+            }
+        }
+
+        await request("Without activation");
+
+        internals.grantTransientActivation();
+        await request("unadjustedMovement", { unadjustedMovement: true });
+
+        internals.grantTransientActivation();
+        await request("With activation");
+
+        const exited = new Promise(resolve => changed = resolve);
+        document.exitPointerLock();
+        await exited;
+        changed = null;
+
+        await request("Again without activation, after exitPointerLock()");
+        document.exitPointerLock();
+        await new Promise(resolve => changed = resolve);
+        println(`pointerLockElement: ${document.pointerLockElement}`);
+    });
+</script>

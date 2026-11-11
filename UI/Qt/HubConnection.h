@@ -211,6 +211,8 @@ private:
     virtual void view_minimize_window(u64 view_id) override;
     virtual void view_fullscreen_window(u64 view_id) override;
     virtual void view_exit_fullscreen_window(u64 view_id) override;
+    virtual void view_lock_pointer(u64 view_id) override;
+    virtual void view_unlock_pointer(u64 view_id) override;
     virtual void view_request_color_picker(u64 view_id, Color current_color) override;
     virtual void view_cancel_permission_prompt(u64 view_id, WebView::PermissionPromptRequest request) override;
     virtual void view_tab_indicator_change(u64 view_id, WebView::TabIndicator indicator, bool visible) override;

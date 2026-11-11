@@ -336,6 +336,10 @@ public:
     // Opening a link in a new tab takes one key or mouse press the view delivered.
     bool take_input_to_open_link_in_new_tab(Badge<WebContentPage>);
     void did_lose_input_event_endpoint(Badge<WebContentPage>, WebContentPage&);
+    // The page hosting the root of the pointer-lock target's document asks for the pointer, and is sent mouse input
+    // while it holds it. The page is answered once the view responds with respond_to_pointer_lock_request().
+    void request_pointer_lock_for(Badge<WebContentPage>, WebContentPage&, Web::HTML::CrossProcessId local_root_id);
+    void did_exit_pointer_lock(Badge<WebContentPage>, WebContentPage&);
     void did_consume_input_event_in_compositor(Badge<WebContentPage>, u64 event_id);
     void did_not_dispatch_input_event_through_compositor(Badge<WebContentPage>, u64 event_id);
     void did_dispatch_input_event_through_compositor(Badge<WebContentPage>, u64 event_id, bool performed_default_action);
@@ -496,6 +500,8 @@ public:
     void js_console_input(String const&);
     void exit_fullscreen();
     void deny_fullscreen_window();
+    void respond_to_pointer_lock_request(bool granted);
+    void exit_pointer_lock();
 
     void set_is_fullscreen(Web::ViewportIsFullscreen is_fullscreen);
     Web::ViewportIsFullscreen is_fullscreen() const { return m_is_fullscreen; }
@@ -682,6 +688,9 @@ public:
     Function<void()> on_minimize_window;
     Function<void()> on_fullscreen_window;
     Function<void()> on_exit_fullscreen_window;
+    // The view locks the pointer, or refuses to, and says which with respond_to_pointer_lock_request().
+    Function<void()> on_request_pointer_lock;
+    Function<void()> on_exit_pointer_lock;
     Function<void(Color current_color)> on_request_color_picker;
     Function<void(Utf16String const& input_type, Utf16String const& value, Utf16String const& minimum, Utf16String const& maximum)> on_request_date_picker;
     Function<void(WebContentPage& requesting_page, u64 request_id, Web::HTML::CrossProcessId document_id)> on_request_geolocation_position;
@@ -972,6 +981,12 @@ protected:
     Optional<Web::UniqueNodeID> m_inspect_element_node_id;
     bool m_inspect_element_activated_before_hit_test { false };
 
+    void end_pointer_lock_of(WebContentPage&);
+    RefPtr<WebContentPage> m_pointer_lock_page;
+    Web::HTML::CrossProcessId m_pointer_lock_root_id {};
+    RefPtr<WebContentPage> m_pending_pointer_lock_page;
+    Web::HTML::CrossProcessId m_pending_pointer_lock_root_id {};
+
     struct PendingInputEvent {
         Web::InputEvent event;
 
@@ -1001,6 +1016,9 @@ protected:
 
         // When the view delivered a paste shortcut, until the page reads the clipboard for it.
         Optional<MonotonicTime> paste_shortcut_time {};
+
+        // The root a mouse event goes to in the endpoint while the pointer is locked.
+        Optional<Web::HTML::CrossProcessId> pointer_lock_root_id {};
     };
     Vector<PendingInputEvent> m_pending_input_events;
 

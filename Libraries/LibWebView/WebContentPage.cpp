@@ -1590,6 +1590,35 @@ void WebContentPage::did_request_exit_fullscreen()
         view().on_exit_fullscreen_window();
 }
 
+void WebContentPage::did_request_pointer_lock(Web::HTML::CrossProcessId navigable_id)
+{
+    // Pointer lock needs the activation of the user's input, which the renderer checks, unless the page released the
+    // lock itself before. A compromised renderer skips that check. The process of an isolated iframe asks for the
+    // pointer itself, and is then sent the tab's mouse input.
+    auto navigable = hosted_navigable(navigable_id);
+    auto may_lock = (has_transient_user_activation() || m_page_released_pointer_lock) && navigable.has_value() && hosts_active_document_of(*navigable);
+    m_page_released_pointer_lock = false;
+    if (!may_lock) {
+        async_respond_to_pointer_lock_request(false);
+        return;
+    }
+    view().request_pointer_lock_for({}, *this, navigable_id);
+}
+
+void WebContentPage::exit_pointer_lock_from_view()
+{
+    m_view_exited_pointer_lock = true;
+    async_exit_pointer_lock();
+}
+
+void WebContentPage::did_exit_pointer_lock()
+{
+    // A page may lock the pointer again without activation only after it released the lock itself, not after the user
+    // did with the default unlock gesture.
+    m_page_released_pointer_lock = !exchange(m_view_exited_pointer_lock, false);
+    view().did_exit_pointer_lock({}, *this);
+}
+
 void WebContentPage::did_exit_picture_in_picture()
 {
     PictureInPictureManager::the().close_window(*this);

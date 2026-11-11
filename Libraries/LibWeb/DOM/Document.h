@@ -1845,6 +1845,12 @@ public:
     bool content_blocker_style_sheet_may_need_refresh_for_class_or_id(Utf16FlyString const* id, ReadonlySpan<Utf16FlyString> class_names);
 
     void exit_pointer_lock();
+    GC::Ptr<Element> pointer_lock_element() const;
+    bool has_released_pointer_lock_with_exit_pointer_lock() const { return m_has_released_pointer_lock_with_exit_pointer_lock; }
+    [[nodiscard]] WebIDL::CallbackType* onpointerlockchange();
+    void set_onpointerlockchange(WebIDL::CallbackType*);
+    [[nodiscard]] WebIDL::CallbackType* onpointerlockerror();
+    void set_onpointerlockerror(WebIDL::CallbackType*);
 
     RefPtr<SelectorQuery const> selector_query_for(Utf16View) const;
     QuerySelectorResultCache& query_selector_result_cache();
@@ -2617,6 +2623,7 @@ private:
     void const* m_rust_custom_property_registry { nullptr };
     bool m_rust_custom_property_registry_synced { false };
     bool m_custom_property_environments_need_republishing { false };
+    bool m_has_released_pointer_lock_with_exit_pointer_lock { false };
 
     CSS::StyleScope m_style_scope;
 

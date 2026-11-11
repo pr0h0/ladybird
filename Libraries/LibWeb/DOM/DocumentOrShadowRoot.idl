@@ -7,3 +7,8 @@ interface mixin DocumentOrShadowRoot {
 partial interface mixin DocumentOrShadowRoot {
     readonly attribute Element? activeElement;
 };
+
+// https://w3c.github.io/pointerlock/#extensions-to-the-documentorshadowroot-mixin
+partial interface mixin DocumentOrShadowRoot {
+    readonly attribute Element? pointerLockElement;
+};

@@ -233,6 +233,7 @@ public:
     ErrorOr<void> restore_session_history_from_snapshot(WebView::SessionHistorySnapshot);
     void exit_fullscreen() { HubConnection::the().async_view_exit_fullscreen(view_id()); }
     void deny_fullscreen_window() { HubConnection::the().async_view_deny_fullscreen_window(view_id()); }
+    void exit_pointer_lock() { HubConnection::the().async_view_exit_pointer_lock(view_id()); }
     void set_is_fullscreen(Web::ViewportIsFullscreen is_fullscreen) { HubConnection::the().async_view_set_is_fullscreen(view_id(), is_fullscreen); }
     Function<void()> prepare_for_close_without_prompting();
     void prepare_for_immediate_close();
@@ -375,6 +376,9 @@ public:
     decltype(Hub::View::on_minimize_window) on_minimize_window;
     decltype(Hub::View::on_fullscreen_window) on_fullscreen_window;
     decltype(Hub::View::on_exit_fullscreen_window) on_exit_fullscreen_window;
+    // Returns whether the view locked the pointer.
+    Function<bool()> on_lock_pointer;
+    Function<void()> on_unlock_pointer;
     decltype(Hub::View::on_request_color_picker) on_request_color_picker;
     decltype(Hub::View::on_request_date_picker) on_request_date_picker;
     decltype(Hub::View::on_request_permission) on_request_permission;

@@ -159,6 +159,13 @@ WebContentView::WebContentView(QWidget* window, Optional<u64> hub_view_id, WebCo
 
     setAttribute(Qt::WA_InputMethodEnabled, true);
 
+    on_lock_pointer = [this] {
+        return lock_pointer();
+    };
+    on_unlock_pointer = [this] {
+        unlock_pointer();
+    };
+
     // Push-based IME state (ViewImplementation::set_input_method_state) must nudge Qt to re-query inputMethodQuery().
     // Without that, the platform IME keeps the stale first-keystroke caret and surrounding text — and composition stops
     // after one character.
@@ -819,6 +826,15 @@ static bool is_browser_reserved_shortcut(QKeyEvent const& event)
 
 void WebContentView::keyPressEvent(QKeyEvent* event)
 {
+    // https://w3c.github.io/pointerlock/#dfn-default-unlock-gesture
+    // The ESC key is the recommended default unlock gesture for user agents with keyboard input.
+    if (m_pointer_locked && event->key() == Qt::Key_Escape) {
+        unlock_pointer();
+        exit_pointer_lock();
+        event->accept();
+        return;
+    }
+
     if (is_node_picker_active()) {
         if (event->key() == Qt::Key_Escape)
             node_picker_cancel();
@@ -895,6 +911,20 @@ void WebContentView::mouseMoveEvent(QMouseEvent* event)
 {
     if (is_node_picker_active()) {
         node_picker_hover(node_picker_position_for(*event));
+        event->accept();
+        return;
+    }
+
+    // While the pointer is locked, the hidden cursor is moved back to the middle of the view after each move, and the
+    // page is sent the motion, accumulated into the screen position, from which it takes the movement of the pointer.
+    if (m_pointer_locked) {
+        auto delta = event->globalPosition().toPoint() - m_pointer_lock_last_global_position;
+        if (!delta.isNull()) {
+            m_pointer_lock_screen_position += delta;
+            QMouseEvent locked_event { event->type(), event->position(), m_pointer_lock_screen_position, event->button(), event->buttons(), event->modifiers() };
+            enqueue_native_event(Web::MouseEvent::Type::MouseMove, locked_event);
+            warp_locked_pointer();
+        }
         event->accept();
         return;
     }
@@ -1073,7 +1103,14 @@ void WebContentView::update_page_focus()
     // A change of the active window and the change of focus it leads to arrive as separate events. Instead of trusting
     // individual events, evaluate the resulting focus state once they have all arrived.
     QTimer::singleShot(0, this, [this] {
-        set_has_system_focus(hasFocus());
+        auto focused = hasFocus();
+        set_has_system_focus(focused);
+
+        // Pointer lock must be exited if the user agent, window, or tab loses focus.
+        if (m_pointer_locked && !focused) {
+            unlock_pointer();
+            exit_pointer_lock();
+        }
     });
 }
 
@@ -2314,64 +2351,64 @@ void WebContentView::update_cursor(Gfx::Cursor cursor)
     cursor.visit([this](Gfx::StandardCursor standard_cursor) {
         switch (standard_cursor) {
         case Gfx::StandardCursor::Hidden:
-            setCursor(Qt::BlankCursor);
+            apply_web_content_cursor(Qt::BlankCursor);
             break;
         case Gfx::StandardCursor::Arrow:
-            setCursor(Qt::ArrowCursor);
+            apply_web_content_cursor(Qt::ArrowCursor);
             break;
         case Gfx::StandardCursor::Crosshair:
-            setCursor(Qt::CrossCursor);
+            apply_web_content_cursor(Qt::CrossCursor);
             break;
         case Gfx::StandardCursor::IBeam:
-            setCursor(Qt::IBeamCursor);
+            apply_web_content_cursor(Qt::IBeamCursor);
             break;
         case Gfx::StandardCursor::ResizeHorizontal:
-            setCursor(Qt::SizeHorCursor);
+            apply_web_content_cursor(Qt::SizeHorCursor);
             break;
         case Gfx::StandardCursor::ResizeVertical:
-            setCursor(Qt::SizeVerCursor);
+            apply_web_content_cursor(Qt::SizeVerCursor);
             break;
         case Gfx::StandardCursor::ResizeDiagonalTLBR:
-            setCursor(Qt::SizeFDiagCursor);
+            apply_web_content_cursor(Qt::SizeFDiagCursor);
             break;
         case Gfx::StandardCursor::ResizeDiagonalBLTR:
-            setCursor(Qt::SizeBDiagCursor);
+            apply_web_content_cursor(Qt::SizeBDiagCursor);
             break;
         case Gfx::StandardCursor::ResizeColumn:
-            setCursor(Qt::SplitHCursor);
+            apply_web_content_cursor(Qt::SplitHCursor);
             break;
         case Gfx::StandardCursor::ResizeRow:
-            setCursor(Qt::SplitVCursor);
+            apply_web_content_cursor(Qt::SplitVCursor);
             break;
         case Gfx::StandardCursor::Hand:
-            setCursor(Qt::PointingHandCursor);
+            apply_web_content_cursor(Qt::PointingHandCursor);
             break;
         case Gfx::StandardCursor::Help:
-            setCursor(Qt::WhatsThisCursor);
+            apply_web_content_cursor(Qt::WhatsThisCursor);
             break;
         case Gfx::StandardCursor::OpenHand:
-            setCursor(Qt::OpenHandCursor);
+            apply_web_content_cursor(Qt::OpenHandCursor);
             break;
         case Gfx::StandardCursor::Drag:
-            setCursor(Qt::ClosedHandCursor);
+            apply_web_content_cursor(Qt::ClosedHandCursor);
             break;
         case Gfx::StandardCursor::DragCopy:
-            setCursor(Qt::DragCopyCursor);
+            apply_web_content_cursor(Qt::DragCopyCursor);
             break;
         case Gfx::StandardCursor::Move:
-            setCursor(Qt::DragMoveCursor);
+            apply_web_content_cursor(Qt::DragMoveCursor);
             break;
         case Gfx::StandardCursor::Wait:
-            setCursor(Qt::BusyCursor);
+            apply_web_content_cursor(Qt::BusyCursor);
             break;
         case Gfx::StandardCursor::Disallowed:
-            setCursor(Qt::ForbiddenCursor);
+            apply_web_content_cursor(Qt::ForbiddenCursor);
             break;
         case Gfx::StandardCursor::Eyedropper:
         case Gfx::StandardCursor::Zoom:
             // FIXME: No corresponding Qt cursors, default to Arrow
         default:
-            setCursor(Qt::ArrowCursor);
+            apply_web_content_cursor(Qt::ArrowCursor);
             break;
         } },
         [this](Gfx::ImageCursor const& image_cursor) {
@@ -2390,8 +2427,59 @@ void WebContentView::update_cursor(Gfx::Cursor cursor)
                 dbgln("Failed to set cursor: Couldn't create QPixmap from QImage.");
                 return;
             }
-            setCursor(QCursor { qpixmap, image_cursor.hotspot.x(), image_cursor.hotspot.y() });
+            apply_web_content_cursor(QCursor { qpixmap, image_cursor.hotspot.x(), image_cursor.hotspot.y() });
         });
+}
+
+void WebContentView::apply_web_content_cursor(QCursor const& cursor)
+{
+    // The cursor stays hidden while the pointer is locked, and shows the page's cursor again once it is unlocked.
+    m_web_content_cursor = cursor;
+    if (m_pointer_locked)
+        return;
+    setCursor(cursor);
+}
+
+// https://w3c.github.io/pointerlock/#pointer-lock-state
+// In the pointer lock state, the system mouse cursor is hidden and the window is prevented from losing focus,
+// regardless of mouse movement or button presses.
+bool WebContentView::lock_pointer()
+{
+    // Pointer lock can only be engaged when the window is in focus.
+    if (!window()->isActiveWindow())
+        return false;
+    if (m_pointer_locked)
+        return true;
+
+    QCursor hidden_cursor { Qt::BlankCursor };
+    setCursor(hidden_cursor);
+
+    m_pointer_locked = true;
+    m_pointer_lock_cursor_position = QCursor::pos();
+    m_pointer_lock_screen_position = m_pointer_lock_cursor_position;
+    warp_locked_pointer();
+    return true;
+}
+
+void WebContentView::warp_locked_pointer()
+{
+    QCursor::setPos(mapToGlobal(rect().center()));
+    // FIXME: Wayland does not let applications move the cursor, so there the hidden cursor stays where it went, and
+    //           stops at the edges of the screen and the window. Confine it with the zwp_pointer_constraints_v1 and
+    //           zwp_relative_pointer_v1 protocols to fix that.
+    m_pointer_lock_last_global_position = QCursor::pos();
+}
+
+// https://w3c.github.io/pointerlock/#dfn-exit-pointer-lock
+void WebContentView::unlock_pointer()
+{
+    if (!m_pointer_locked)
+        return;
+    m_pointer_locked = false;
+
+    // The system mouse cursor must be displayed again and positioned at cursor position.
+    QCursor::setPos(m_pointer_lock_cursor_position);
+    apply_web_content_cursor(m_web_content_cursor);
 }
 
 Web::DevicePixelPoint WebContentView::node_picker_position_for(QSinglePointEvent const& event) const

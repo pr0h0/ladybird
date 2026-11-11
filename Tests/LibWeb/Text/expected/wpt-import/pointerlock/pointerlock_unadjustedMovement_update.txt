@@ -1,0 +1,7 @@
+Harness status: OK
+
+Found 2 tests
+
+2 Fail
+Fail	request pointer lock with different unadjustedMovement on the same locked element should still fire pointerlockchange event
+Fail	request pointer lock with different unadjustedMovement on the different element should still fire pointerlockchange event

@@ -264,6 +264,8 @@ private:
     virtual void page_did_request_minimize_window() override;
     virtual void page_did_request_fullscreen_window() override;
     virtual void page_did_request_exit_fullscreen() override;
+    virtual void page_did_request_pointer_lock(Web::HTML::CrossProcessId local_root_id) override;
+    virtual void page_did_exit_pointer_lock() override;
     virtual void page_did_exit_picture_in_picture() override;
     virtual void page_did_change_picture_in_picture_video_size(Gfx::IntSize) override;
     virtual void page_did_change_picture_in_picture_player_controls_visibility(bool shown) override;

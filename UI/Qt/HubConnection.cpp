@@ -1050,6 +1050,19 @@ void HubConnection::view_exit_fullscreen_window(u64 view_id)
         view->on_exit_fullscreen_window();
 }
 
+void HubConnection::view_lock_pointer(u64 view_id)
+{
+    auto* view = RemoteView::find(view_id);
+    auto granted = view && view->on_lock_pointer && view->on_lock_pointer();
+    async_view_respond_to_pointer_lock_request(view_id, granted);
+}
+
+void HubConnection::view_unlock_pointer(u64 view_id)
+{
+    if (auto* view = RemoteView::find(view_id); view && view->on_unlock_pointer)
+        view->on_unlock_pointer();
+}
+
 void HubConnection::view_request_color_picker(u64 view_id, Color current_color)
 {
     if (auto* view = RemoteView::find(view_id); view && view->on_request_color_picker)

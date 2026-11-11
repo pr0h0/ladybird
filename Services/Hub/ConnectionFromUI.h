@@ -221,6 +221,8 @@ private:
     virtual void view_request_close(u64 view_id) override;
     virtual void view_exit_fullscreen(u64 view_id) override;
     virtual void view_deny_fullscreen_window(u64 view_id) override;
+    virtual void view_respond_to_pointer_lock_request(u64 view_id, bool granted) override;
+    virtual void view_exit_pointer_lock(u64 view_id) override;
     virtual void view_set_is_fullscreen(u64 view_id, Web::ViewportIsFullscreen is_fullscreen) override;
     virtual void view_reset_site_permissions(u64 view_id, URL::Origin origin) override;
 };

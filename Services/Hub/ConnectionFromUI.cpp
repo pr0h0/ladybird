@@ -1381,6 +1381,18 @@ void ConnectionFromUI::view_deny_fullscreen_window(u64 view_id)
         view->deny_fullscreen_window();
 }
 
+void ConnectionFromUI::view_respond_to_pointer_lock_request(u64 view_id, bool granted)
+{
+    if (auto* view = find_view(view_id))
+        view->respond_to_pointer_lock_request(granted);
+}
+
+void ConnectionFromUI::view_exit_pointer_lock(u64 view_id)
+{
+    if (auto* view = find_view(view_id))
+        view->exit_pointer_lock();
+}
+
 void ConnectionFromUI::view_exit_fullscreen(u64 view_id)
 {
     if (auto* view = find_view(view_id)) {

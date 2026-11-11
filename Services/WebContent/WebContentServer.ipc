@@ -152,6 +152,8 @@ endpoint WebContentServer routed by Web::PageId page_id
     set_viewport(Web::PageId page_id, Web::DevicePixelSize size, double device_pixel_ratio, Web::ViewportIsFullscreen is_fullscreen) =|
     set_viewport_is_fullscreen(Web::PageId page_id, Web::ViewportIsFullscreen is_fullscreen) =|
     deny_fullscreen_window(Web::PageId page_id) =|
+    respond_to_pointer_lock_request(Web::PageId page_id, bool granted) =|
+    exit_pointer_lock(Web::PageId page_id) =|
 
     key_event(Web::PageId page_id, Web::KeyEvent event) =|
     mouse_event(Web::PageId page_id, Web::MouseEvent event) =|

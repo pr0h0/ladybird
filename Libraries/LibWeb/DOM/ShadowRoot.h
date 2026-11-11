@@ -121,6 +121,7 @@ public:
     virtual void finalize() override;
 
     GC::Ptr<Element> retargeted_fullscreen_element() const;
+    GC::Ptr<Element> pointer_lock_element() const;
     GC::Ptr<Element> retargeted_picture_in_picture_element() const;
 
     // A shadow root is not an element and has no style of its own, but it is a parent in the style

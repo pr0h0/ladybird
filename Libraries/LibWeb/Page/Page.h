@@ -516,6 +516,12 @@ public:
     void set_viewport_is_fullscreen(ViewportIsFullscreen);
     void did_deny_fullscreen_window();
 
+    // https://w3c.github.io/pointerlock/#dfn-pointer-lock-target
+    GC::Ptr<DOM::Element> pointer_lock_target() const { return m_pointer_lock_target; }
+    void request_pointer_lock(GC::Ref<DOM::Element>, GC::Ref<WebIDL::Promise>);
+    void did_respond_to_pointer_lock_request(bool granted);
+    void exit_pointer_lock();
+
 private:
     explicit Page(GC::Ref<PageClient>);
     virtual void visit_edges(Visitor&) override;
@@ -559,6 +565,31 @@ private:
     // that handler ends the hover when its document is replaced; another navigable's replacement (an iframe the pointer
     // once passed through, e.g.) leaves the report standing.
     GC::Weak<HTML::LocalNavigable> m_hover_reporting_navigable;
+
+    // https://w3c.github.io/pointerlock/#pointer-lock-state
+    struct PointerLockedMouseInput {
+        Web::MouseEvent::Type type;
+        DevicePixelPoint screen_position {};
+        unsigned button { 0 };
+        unsigned buttons { 0 };
+        unsigned modifiers { 0 };
+        int click_count { 0 };
+        double wheel_delta_x { 0 };
+        double wheel_delta_y { 0 };
+        double wheel_tick_120ths_x { 0 };
+        double wheel_tick_120ths_y { 0 };
+    };
+    EventResult handle_pointer_locked_mouse_input(PointerLockedMouseInput const&);
+
+    GC::Ptr<DOM::Element> m_pointer_lock_target;
+    GC::Ptr<DOM::Element> m_pending_pointer_lock_element;
+    GC::Ptr<WebIDL::Promise> m_pending_pointer_lock_promise;
+    // The coordinates mouse events hold constant while the pointer is locked, and the last screen position the UI
+    // reported, from which movement is taken.
+    CSSPixelPoint m_pointer_lock_client_position;
+    CSSPixelPoint m_pointer_lock_screen_position;
+    CSSPixelPoint m_pointer_lock_previous_screen_position;
+    Optional<unsigned> m_pointer_lock_pressed_button;
 
     GC::Ptr<HTML::Navigable> m_top_level_traversable;
     OwnPtr<Compositor::CompositorContextHandle> m_retired_page_compositor_context;
@@ -818,6 +849,9 @@ public:
     virtual void page_did_request_minimize_window() { }
     virtual void page_did_request_fullscreen_window() { }
     virtual void page_did_request_exit_fullscreen() { }
+    // The pointer-lock target is in the document of the local root, which the UI sends mouse input to while locked.
+    virtual void page_did_request_pointer_lock(HTML::CrossProcessId) { }
+    virtual void page_did_exit_pointer_lock() { }
     virtual void page_did_exit_picture_in_picture() { }
     virtual void page_did_change_picture_in_picture_video_size(Gfx::IntSize) { }
     virtual void page_did_change_picture_in_picture_player_controls_visibility(bool) { }
